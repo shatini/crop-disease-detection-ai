@@ -36,7 +36,7 @@ agro-ai-portfolio/
 Run it yourself
 # Install dependencies pip install torch torchvision
 # Train from scratch python train.py
- 
+
 Tech stack
 Python 3.12
  
