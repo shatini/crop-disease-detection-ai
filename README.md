@@ -28,7 +28,11 @@ agro-ai-portfolio/
 ├── README.md
 └── models/
     └── agro_ai_resnet18.pth   # Trained weights
- 
+    
+## Training visualization
+
+![Training Progress](https://github.com/JohnDeepInside/agro-ai-portfolio/raw/main/training_plot.png)
+
 Run it yourself
 # Install dependencies pip install torch torchvision
 # Train from scratch python train.py
