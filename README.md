@@ -37,6 +37,14 @@ Run it yourself
 # Install dependencies pip install torch torchvision
 # Train from scratch python train.py
 
+## Model Weights
+
+Trained model weights (`agro_ai_resnet18.pth`) are not included in this repository due to file size (44MB).
+
+To obtain the trained model:
+- Train from scratch using `train.py` (recommended for learning)
+- Contact for pre-trained weights: Available upon request
+
 Tech stack
 Python 3.12
  
