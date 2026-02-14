@@ -1,4 +1,4 @@
-# Crop Disease Detection
+# Crop Disease Detection — AgroAI
 
 Deep learning system for identifying plant diseases from leaf photographs. Trained on 54,000+ images across 38 disease categories using ResNet18 with transfer learning, achieving 98.8% validation accuracy.
 
@@ -149,4 +149,4 @@ python inference.py --image leaf_photo.jpg --checkpoint outputs/checkpoints/best
 
 Built by **Nikolai Shatikhin** — ML Engineer specializing in Computer Vision and image classification.
 
-Open to freelance projects. Reach out via [GitHub](https://github.com/shatini) or [Telegram](https://t.me/niko_shat).
+Open to freelance projects. Reach out via [GitHub](https://github.com/shatini) or [Telegram](https://t.me/That_Special_Someone).
