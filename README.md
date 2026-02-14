@@ -1,4 +1,4 @@
-# Crop Disease Detection — AgroAI
+# Crop Disease Detection
 
 Deep learning system for identifying plant diseases from leaf photographs. Trained on 54,000+ images across 38 disease categories using ResNet18 with transfer learning, achieving 98.8% validation accuracy.
 
