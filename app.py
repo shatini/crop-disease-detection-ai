@@ -1,6 +1,6 @@
 """
-Gradio demo — Crop Disease Detection.
-Upload best_model.pth (ResNet18, 38 classes) and class_names.txt to the Space root.
+Gradio demo — Skin Cancer Detection (HAM10000).
+Upload best_model.pth (MobileNetV2, 7 classes) to the Space root.
 """
 
 import gradio as gr
@@ -8,36 +8,46 @@ import torch
 import torch.nn as nn
 from torchvision import models, transforms
 from PIL import Image
-from pathlib import Path
 
-CLASS_NAMES = [
-    "Apple___Apple_scab", "Apple___Black_rot", "Apple___Cedar_apple_rust", "Apple___healthy",
-    "Blueberry___healthy",
-    "Cherry_(including_sour)___Powdery_mildew", "Cherry_(including_sour)___healthy",
-    "Corn_(maize)___Cercospora_leaf_spot", "Corn_(maize)___Common_rust",
-    "Corn_(maize)___Northern_Leaf_Blight", "Corn_(maize)___healthy",
-    "Grape___Black_rot", "Grape___Esca_(Black_Measles)",
-    "Grape___Leaf_blight_(Isariopsis_Leaf_Spot)", "Grape___healthy",
-    "Orange___Haunglongbing_(Citrus_greening)",
-    "Peach___Bacterial_spot", "Peach___healthy",
-    "Pepper,_bell___Bacterial_spot", "Pepper,_bell___healthy",
-    "Potato___Early_blight", "Potato___Late_blight", "Potato___healthy",
-    "Raspberry___healthy",
-    "Soybean___healthy",
-    "Squash___Powdery_mildew",
-    "Strawberry___Leaf_scorch", "Strawberry___healthy",
-    "Tomato___Bacterial_spot", "Tomato___Early_blight", "Tomato___Late_blight",
-    "Tomato___Leaf_Mold", "Tomato___Septoria_leaf_spot",
-    "Tomato___Spider_mites Two-spotted_spider_mite", "Tomato___Target_Spot",
-    "Tomato___Tomato_Yellow_Leaf_Curl_Virus", "Tomato___Tomato_mosaic_virus",
-    "Tomato___healthy",
-]
+CLASS_NAMES = ["akiec", "bcc", "bkl", "df", "mel", "nv", "vasc"]
+
+CLASS_DESCRIPTIONS = {
+    "akiec": "Actinic Keratoses (precancerous)",
+    "bcc":   "Basal Cell Carcinoma",
+    "bkl":   "Benign Keratosis",
+    "df":    "Dermatofibroma",
+    "mel":   "Melanoma (malignant)",
+    "nv":    "Melanocytic Nevi (mole)",
+    "vasc":  "Vascular Lesion",
+}
+
+RISK_LEVELS = {
+    "akiec": "Medium — precancerous, monitor closely",
+    "bcc":   "Medium — most common skin cancer, usually treatable",
+    "bkl":   "Low — benign growth",
+    "df":    "Low — benign fibrous nodule",
+    "mel":   "HIGH — potentially deadly, seek immediate evaluation",
+    "nv":    "Low — common mole, usually benign",
+    "vasc":  "Low — benign vascular growth",
+}
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-model = models.resnet18(weights=None)
-model.fc = nn.Linear(model.fc.in_features, len(CLASS_NAMES))
-model.load_state_dict(torch.load("best_model.pth", map_location=DEVICE))
+# Load model
+ckpt = torch.load("best_model.pth", map_location=DEVICE, weights_only=True)
+arch = ckpt.get("arch", "mobilenet_v2")
+
+if arch == "mobilenet_v2":
+    model = models.mobilenet_v2(weights=None)
+    model.classifier[1] = nn.Linear(model.classifier[1].in_features, len(CLASS_NAMES))
+elif arch == "efficientnet_b0":
+    model = models.efficientnet_b0(weights=None)
+    model.classifier[1] = nn.Linear(model.classifier[1].in_features, len(CLASS_NAMES))
+elif arch == "resnet18":
+    model = models.resnet18(weights=None)
+    model.fc = nn.Linear(model.fc.in_features, len(CLASS_NAMES))
+
+model.load_state_dict(ckpt["model_state_dict"])
 model.to(DEVICE)
 model.eval()
 
@@ -48,16 +58,9 @@ transform = transforms.Compose([
 ])
 
 
-def format_label(name):
-    crop, condition = name.split("___")
-    crop = crop.replace("_", " ")
-    condition = condition.replace("_", " ")
-    return f"{crop} — {condition}"
-
-
 def predict(image):
     if image is None:
-        return {}
+        return {}, ""
     img = Image.fromarray(image).convert("RGB")
     tensor = transform(img).unsqueeze(0).to(DEVICE)
 
@@ -65,31 +68,72 @@ def predict(image):
         logits = model(tensor)
         probs = torch.softmax(logits, dim=1)[0]
 
-    top5_probs, top5_idx = torch.topk(probs, 5)
-    return {format_label(CLASS_NAMES[i]): float(p) for p, i in zip(top5_probs, top5_idx)}
+    pred_idx = probs.argmax().item()
+    pred_class = CLASS_NAMES[pred_idx]
+
+    # Build warning message
+    desc = CLASS_DESCRIPTIONS[pred_class]
+    risk = RISK_LEVELS[pred_class]
+    confidence = probs[pred_idx].item()
+
+    if pred_class == "mel":
+        warning = (
+            f"### Prediction: {desc}\n"
+            f"**Confidence: {confidence:.1%}**\n\n"
+            f"**Risk: {risk}**\n\n"
+            "> **WARNING:** Melanoma detected. "
+            "Please consult a dermatologist immediately."
+        )
+    elif pred_class in ("bcc", "akiec"):
+        warning = (
+            f"### Prediction: {desc}\n"
+            f"**Confidence: {confidence:.1%}**\n\n"
+            f"**Risk: {risk}**\n\n"
+            "> **NOTICE:** Potentially concerning lesion. "
+            "Professional evaluation recommended."
+        )
+    else:
+        warning = (
+            f"### Prediction: {desc}\n"
+            f"**Confidence: {confidence:.1%}**\n\n"
+            f"**Risk: {risk}**"
+        )
+
+    labels = {CLASS_DESCRIPTIONS[CLASS_NAMES[i]]: float(probs[i]) for i in range(len(CLASS_NAMES))}
+    return labels, warning
 
 
-with gr.Blocks(title="Crop Disease Detector", theme=gr.themes.Soft()) as demo:
+with gr.Blocks(title="Skin Cancer Detector", theme=gr.themes.Soft()) as demo:
     gr.Markdown(
-        "# Crop Disease Detection\n"
-        "Upload a leaf photo to identify the plant disease.\n\n"
-        "Model: ResNet18 | Accuracy: 98.8% | 38 categories | 14 crop species"
+        "# Skin Cancer Detection\n"
+        "Upload a dermoscopic image of a skin lesion to classify it.\n\n"
+        "Model: MobileNetV2 | Dataset: HAM10000 | 7 diagnostic categories\n\n"
+        "> **Disclaimer:** This tool is for educational purposes only. "
+        "It does NOT replace professional medical diagnosis."
     )
 
     with gr.Row():
         with gr.Column():
-            image_input = gr.Image(label="Leaf Photo")
-            btn = gr.Button("Identify Disease", variant="primary", size="lg")
+            image_input = gr.Image(label="Dermoscopic Image")
+            btn = gr.Button("Analyze Lesion", variant="primary", size="lg")
         with gr.Column():
-            output = gr.Label(num_top_classes=5, label="Top-5 Predictions")
+            output = gr.Label(num_top_classes=7, label="Classification")
+            warning_box = gr.Markdown(label="Assessment")
 
-    btn.click(fn=predict, inputs=image_input, outputs=output)
+    btn.click(fn=predict, inputs=image_input, outputs=[output, warning_box])
+
+    with gr.Accordion("Lesion Types Reference", open=False):
+        gr.Markdown(
+            "\n".join(
+                f"- **{k.upper()}** — {v} | Risk: {RISK_LEVELS[k]}"
+                for k, v in CLASS_DESCRIPTIONS.items()
+            )
+        )
 
     gr.Markdown(
-        "**Supported crops:** Apple, Blueberry, Cherry, Corn, Grape, Orange, "
-        "Peach, Pepper, Potato, Raspberry, Soybean, Squash, Strawberry, Tomato\n\n---\n"
+        "---\n"
         "Built by [Nikolai Shatikhin](https://github.com/shatini) "
-        "| [Source Code](https://github.com/shatini/crop-disease-detection-ai)"
+        "| [Source Code](https://github.com/shatini/skin-cancer-detection-ai)"
     )
 
 if __name__ == "__main__":

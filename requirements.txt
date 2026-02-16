@@ -1,5 +1,4 @@
+torch
+torchvision
 gradio
-joblib
-lightgbm
-scikit-learn
-numpy
+Pillow
