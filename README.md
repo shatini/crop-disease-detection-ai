@@ -13,11 +13,22 @@ Deep learning system for identifying plant diseases from leaf photographs. Train
 
 | Metric | Value |
 |--------|-------|
-| Validation accuracy | **98.8%** |
-| Architecture | ResNet18 (ImageNet pretrained) |
+| Best model | ResNet18 |
+| Best accuracy | 98.8% |
 | Classes | 38 disease categories, 14 crop species |
 | Dataset | PlantVillage — 54,305 images |
 | Input size | 224 x 224 px |
+
+### Model Comparison
+
+| Model | Accuracy | Inference Time |
+|-------|----------|----------------|
+| ResNet34 | 99.1% | 65 ms |
+| **ResNet18** | **98.8%** | **42 ms** |
+| EfficientNet-B0 | 98.5% | 55 ms |
+| MobileNetV2 | 97.2% | 35 ms |
+
+> ResNet18 selected as primary model — best accuracy/speed trade-off.
 
 ### Training Curves
 
