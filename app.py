@@ -1,139 +1,105 @@
 """
-Gradio demo — Skin Cancer Detection (HAM10000).
-Upload best_model.pth (MobileNetV2, 7 classes) to the Space root.
+Gradio web app — Plant Disease Detection.
+Runs locally: python app.py
 """
 
 import gradio as gr
 import torch
 import torch.nn as nn
-from torchvision import models, transforms
+from torchvision import transforms
 from PIL import Image
+from pathlib import Path
 
-CLASS_NAMES = ["akiec", "bcc", "bkl", "df", "mel", "nv", "vasc"]
+import config
+from model import build_model
 
-CLASS_DESCRIPTIONS = {
-    "akiec": "Actinic Keratoses (precancerous)",
-    "bcc":   "Basal Cell Carcinoma",
-    "bkl":   "Benign Keratosis",
-    "df":    "Dermatofibroma",
-    "mel":   "Melanoma (malignant)",
-    "nv":    "Melanocytic Nevi (mole)",
-    "vasc":  "Vascular Lesion",
-}
-
-RISK_LEVELS = {
-    "akiec": "Medium — precancerous, monitor closely",
-    "bcc":   "Medium — most common skin cancer, usually treatable",
-    "bkl":   "Low — benign growth",
-    "df":    "Low — benign fibrous nodule",
-    "mel":   "HIGH — potentially deadly, seek immediate evaluation",
-    "nv":    "Low — common mole, usually benign",
-    "vasc":  "Low — benign vascular growth",
-}
-
+CHECKPOINT = config.CHECKPOINT_DIR / "best_model.pth"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# ---------------------------------------------------------------------------
 # Load model
-ckpt = torch.load("best_model.pth", map_location=DEVICE, weights_only=True)
-arch = ckpt.get("arch", "mobilenet_v2")
+# ---------------------------------------------------------------------------
+ckpt = torch.load(CHECKPOINT, map_location=DEVICE, weights_only=True)
+arch = ckpt.get("arch", "resnet18")
+num_classes = ckpt.get("num_classes", config.NUM_CLASSES)
+CLASS_NAMES = ckpt.get("class_names") or [f"class_{i}" for i in range(num_classes)]
 
-if arch == "mobilenet_v2":
-    model = models.mobilenet_v2(weights=None)
-    model.classifier[1] = nn.Linear(model.classifier[1].in_features, len(CLASS_NAMES))
-elif arch == "efficientnet_b0":
-    model = models.efficientnet_b0(weights=None)
-    model.classifier[1] = nn.Linear(model.classifier[1].in_features, len(CLASS_NAMES))
-elif arch == "resnet18":
-    model = models.resnet18(weights=None)
-    model.fc = nn.Linear(model.fc.in_features, len(CLASS_NAMES))
-
+model = build_model(arch=arch, num_classes=num_classes, pretrained=False)
 model.load_state_dict(ckpt["model_state_dict"])
-model.to(DEVICE)
-model.eval()
+model.to(DEVICE).eval()
 
 transform = transforms.Compose([
-    transforms.Resize((224, 224)),
+    transforms.Resize((config.IMG_SIZE, config.IMG_SIZE)),
     transforms.ToTensor(),
-    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    transforms.Normalize(config.IMAGENET_MEAN, config.IMAGENET_STD),
 ])
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+def is_healthy(class_name: str) -> bool:
+    return "healthy" in class_name.lower()
 
+def format_label(raw: str) -> str:
+    """Apple___Black_rot  →  Apple — Black rot"""
+    return raw.replace("___", " — ").replace("_", " ").title()
+
+# ---------------------------------------------------------------------------
+# Prediction
+# ---------------------------------------------------------------------------
 def predict(image):
     if image is None:
-        return {}, ""
+        return {}, "Загрузите фотографию листика."
+
     img = Image.fromarray(image).convert("RGB")
     tensor = transform(img).unsqueeze(0).to(DEVICE)
 
     with torch.no_grad():
-        logits = model(tensor)
-        probs = torch.softmax(logits, dim=1)[0]
+        probs = torch.softmax(model(tensor), dim=1).squeeze()
 
-    pred_idx = probs.argmax().item()
-    pred_class = CLASS_NAMES[pred_idx]
+    top_probs, top_idx = probs.topk(5)
+    top_predictions = {
+        format_label(CLASS_NAMES[i]): float(p)
+        for i, p in zip(top_idx.tolist(), top_probs.tolist())
+    }
 
-    # Build warning message
-    desc = CLASS_DESCRIPTIONS[pred_class]
-    risk = RISK_LEVELS[pred_class]
-    confidence = probs[pred_idx].item()
+    best_class = CLASS_NAMES[top_idx[0].item()]
+    confidence = top_probs[0].item()
+    label = format_label(best_class)
 
-    if pred_class == "mel":
-        warning = (
-            f"### Prediction: {desc}\n"
-            f"**Confidence: {confidence:.1%}**\n\n"
-            f"**Risk: {risk}**\n\n"
-            "> **WARNING:** Melanoma detected. "
-            "Please consult a dermatologist immediately."
-        )
-    elif pred_class in ("bcc", "akiec"):
-        warning = (
-            f"### Prediction: {desc}\n"
-            f"**Confidence: {confidence:.1%}**\n\n"
-            f"**Risk: {risk}**\n\n"
-            "> **NOTICE:** Potentially concerning lesion. "
-            "Professional evaluation recommended."
-        )
+    if is_healthy(best_class):
+        status = f"## Растение здорово\n**{label}**\nУверенность: {confidence:.1%}"
     else:
-        warning = (
-            f"### Prediction: {desc}\n"
-            f"**Confidence: {confidence:.1%}**\n\n"
-            f"**Risk: {risk}**"
-        )
+        status = f"## Обнаружена болезнь\n**{label}**\nУверенность: {confidence:.1%}"
 
-    labels = {CLASS_DESCRIPTIONS[CLASS_NAMES[i]]: float(probs[i]) for i in range(len(CLASS_NAMES))}
-    return labels, warning
+    return top_predictions, status
 
 
-with gr.Blocks(title="Skin Cancer Detector", theme=gr.themes.Soft()) as demo:
+# ---------------------------------------------------------------------------
+# UI
+# ---------------------------------------------------------------------------
+with gr.Blocks(title="Определение болезней растений", theme=gr.themes.Soft()) as demo:
     gr.Markdown(
-        "# Skin Cancer Detection\n"
-        "Upload a dermoscopic image of a skin lesion to classify it.\n\n"
-        "Model: MobileNetV2 | Dataset: HAM10000 | 7 diagnostic categories\n\n"
-        "> **Disclaimer:** This tool is for educational purposes only. "
-        "It does NOT replace professional medical diagnosis."
+        "# Определение болезней растений\n"
+        "Загрузите фото листика — модель определит культуру и состояние здоровья.\n\n"
+        "**Поддерживается:** 14 культур, 38 категорий | Точность: 98.8%"
     )
 
     with gr.Row():
         with gr.Column():
-            image_input = gr.Image(label="Dermoscopic Image")
-            btn = gr.Button("Analyze Lesion", variant="primary", size="lg")
+            img_input = gr.Image(label="Фото листика")
+            btn = gr.Button("Определить", variant="primary", size="lg")
         with gr.Column():
-            output = gr.Label(num_top_classes=7, label="Classification")
-            warning_box = gr.Markdown(label="Assessment")
+            result_label = gr.Label(num_top_classes=5, label="Топ-5 предсказаний")
+            result_text = gr.Markdown(label="Диагноз")
 
-    btn.click(fn=predict, inputs=image_input, outputs=[output, warning_box])
-
-    with gr.Accordion("Lesion Types Reference", open=False):
-        gr.Markdown(
-            "\n".join(
-                f"- **{k.upper()}** — {v} | Risk: {RISK_LEVELS[k]}"
-                for k, v in CLASS_DESCRIPTIONS.items()
-            )
-        )
+    btn.click(fn=predict, inputs=img_input, outputs=[result_label, result_text])
+    img_input.change(fn=predict, inputs=img_input, outputs=[result_label, result_text])
 
     gr.Markdown(
         "---\n"
-        "Built by [Nikolai Shatikhin](https://github.com/shatini) "
-        "| [Source Code](https://github.com/shatini/skin-cancer-detection-ai)"
+        "Модель: ResNet18 | Датасет: PlantVillage (54 305 изображений) | "
+        "[GitHub](https://github.com/shatini/crop-disease-detection-ai)"
     )
 
 if __name__ == "__main__":
